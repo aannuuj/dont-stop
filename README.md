@@ -30,6 +30,23 @@ This repo is starting with a small native macOS implementation and will grow in 
 7. Codex and Claude setup
 8. release packaging
 
+## Terminal Helper
+
+The helper can start or stop an awake session around a command:
+
+```sh
+./bin/dont-stop on
+./bin/dont-stop status
+./bin/dont-stop run -- codex
+./bin/dont-stop off
+```
+
+Install it to `~/.local/bin`:
+
+```sh
+make install-helper
+```
+
 ## Safety
 
 Normal awake mode is for preventing idle system sleep while the Mac is open.

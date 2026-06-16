@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="Don't Stop.app"
+EXECUTABLE="DontStop"
+SUPPORT_DIR="${HOME}/Library/Application Support/DontStop"
+COMMAND_DIR="${SUPPORT_DIR}/commands"
+STATE_FILE="${SUPPORT_DIR}/state"
+COMMAND_COUNTER=0
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  dont-stop on [--minutes N] [--display] [--reason TEXT]
+  dont-stop off
+  dont-stop status
+  dont-stop run [--minutes N] [--display] [--reason TEXT] -- COMMAND [ARGS...]
+USAGE
+}
+
+find_app() {
+  if [[ -n "${DONT_STOP_APP:-}" && -d "${DONT_STOP_APP}" ]]; then
+    printf '%s\n' "${DONT_STOP_APP}"
+    return 0
+  fi
+
+  local candidates=(
+    "$(pwd)/build/${APP_NAME}"
+    "${HOME}/Applications/${APP_NAME}"
+    "/Applications/${APP_NAME}"
+  )
+
+  for app in "${candidates[@]}"; do
+    if [[ -d "${app}" ]]; then
+      printf '%s\n' "${app}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+ensure_app_running() {
+  if /usr/bin/pgrep -x "${EXECUTABLE}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local app
+  app="$(find_app)" || {
+    echo "Don't Stop.app was not found. Build or install it first." >&2
+    exit 66
+  }
+
+  /usr/bin/open "${app}"
+  sleep 0.4
+}
+
+send_command() {
+  local action="$1"
+  local minutes="${2:-}"
+  local display="${3:-0}"
+  local reason="${4:-Terminal}"
+
+  ensure_app_running
+  /bin/mkdir -p "${COMMAND_DIR}"
+
+  local file
+  COMMAND_COUNTER=$((COMMAND_COUNTER + 1))
+  file="${COMMAND_DIR}/$(date +%s)-$$-$(printf '%03d' "${COMMAND_COUNTER}")-${action}"
+  {
+    printf 'action=%s\n' "${action}"
+    printf 'display=%s\n' "${display}"
+    printf 'reason=%s\n' "${reason}"
+    if [[ -n "${minutes}" ]]; then
+      printf 'minutes=%s\n' "${minutes}"
+    fi
+  } > "${file}"
+}
+
+print_status() {
+  if [[ ! -f "${STATE_FILE}" ]]; then
+    echo "Don't Stop status is not available yet."
+    return 1
+  fi
+
+  local active display lid remaining
+  active="$(awk -F= '$1 == "active" {print $2}' "${STATE_FILE}")"
+  display="$(awk -F= '$1 == "display" {print $2}' "${STATE_FILE}")"
+  lid="$(awk -F= '$1 == "lid" {print $2}' "${STATE_FILE}")"
+  remaining="$(awk -F= '$1 == "remaining" {print $2}' "${STATE_FILE}")"
+
+  [[ "${active}" == "1" ]] && echo "awake: on" || echo "awake: off"
+  [[ "${display}" == "1" ]] && echo "display: on" || echo "display: sleep allowed"
+  [[ "${lid}" == "1" ]] && echo "lid mode: on" || echo "lid mode: off"
+  echo "auto stop: ${remaining:-unknown}"
+}
+
+parse_options() {
+  MINUTES=""
+  DISPLAY="0"
+  REASON="Terminal"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --minutes)
+        if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "--minutes requires a number of minutes" >&2
+          exit 64
+        fi
+        MINUTES="${2:-}"
+        if ! [[ "${MINUTES}" =~ ^[0-9]+$ ]]; then
+          echo "--minutes must be a positive integer" >&2
+          exit 64
+        fi
+        shift 2
+        ;;
+      --display)
+        DISPLAY="1"
+        shift
+        ;;
+      --reason)
+        if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
+          echo "--reason requires text" >&2
+          exit 64
+        fi
+        REASON="${2:-Terminal}"
+        shift 2
+        ;;
+      --)
+        shift
+        COMMAND=("$@")
+        return 0
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  COMMAND=("$@")
+}
+
+main() {
+  local command="${1:-}"
+  [[ $# -gt 0 ]] && shift || true
+
+  case "${command}" in
+    on)
+      parse_options "$@"
+      send_command "on" "${MINUTES}" "${DISPLAY}" "${REASON}"
+      ;;
+    off)
+      send_command "off"
+      ;;
+    status)
+      print_status
+      ;;
+    run)
+      parse_options "$@"
+      if [[ ${#COMMAND[@]} -eq 0 ]]; then
+        usage >&2
+        exit 64
+      fi
+      send_command "on" "${MINUTES}" "${DISPLAY}" "${REASON}"
+      trap 'send_command "off" >/dev/null 2>&1 || true' EXIT
+      "${COMMAND[@]}"
+      ;;
+    ""|-h|--help|help)
+      usage
+      ;;
+    *)
+      usage >&2
+      exit 64
+      ;;
+  esac
+}
+
+main "$@"

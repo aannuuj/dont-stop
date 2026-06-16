@@ -1,6 +1,13 @@
 import AppKit
 import IOKit.pwr_mgt
 
+private let appSupportName = "DontStop"
+
+private func applicationSupportDirectory() -> URL {
+    let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    return baseURL.appendingPathComponent(appSupportName, isDirectory: true)
+}
+
 struct DurationOption {
     let title: String
     let seconds: TimeInterval?
@@ -11,6 +18,13 @@ struct DurationOption {
         DurationOption(title: "1 Hour", seconds: 60 * 60),
         DurationOption(title: "4 Hours", seconds: 4 * 60 * 60)
     ]
+}
+
+struct TerminalCommand {
+    let action: String
+    let minutes: Int?
+    let display: Bool
+    let reason: String
 }
 
 final class AwakeController {
@@ -135,6 +149,91 @@ final class AwakeController {
     }
 }
 
+final class StateStore {
+    private let directory = applicationSupportDirectory()
+    private lazy var stateURL = directory.appendingPathComponent("state")
+
+    func write(active: Bool, display: Bool, lid: Bool, remaining: String) {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let body = [
+                "active=\(active ? "1" : "0")",
+                "display=\(display ? "1" : "0")",
+                "lid=\(lid ? "1" : "0")",
+                "remaining=\(remaining)",
+                "updated=\(Int(Date().timeIntervalSince1970))"
+            ].joined(separator: "\n") + "\n"
+
+            try body.write(to: stateURL, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("Don't Stop could not write state: \(error.localizedDescription)")
+        }
+    }
+}
+
+final class CommandInbox {
+    private let directory = applicationSupportDirectory().appendingPathComponent("commands", isDirectory: true)
+    private var timer: Timer?
+
+    func start(handler: @escaping (TerminalCommand) -> Void) {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            NSLog("Don't Stop could not create command inbox: \(error.localizedDescription)")
+        }
+
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.processPendingCommands(handler: handler)
+        }
+        timer?.tolerance = 0.2
+    }
+
+    private func processPendingCommands(handler: (TerminalCommand) -> Void) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) else {
+            return
+        }
+
+        for file in files {
+            guard let command = parseCommand(at: file) else {
+                try? FileManager.default.removeItem(at: file)
+                continue
+            }
+
+            handler(command)
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private func parseCommand(at file: URL) -> TerminalCommand? {
+        guard let body = try? String(contentsOf: file, encoding: .utf8) else {
+            return nil
+        }
+
+        var values: [String: String] = [:]
+        for line in body.split(separator: "\n") {
+            let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else {
+                continue
+            }
+            values[parts[0]] = parts[1]
+        }
+
+        guard let action = values["action"] else {
+            return nil
+        }
+
+        return TerminalCommand(
+            action: action,
+            minutes: values["minutes"].flatMap(Int.init),
+            display: values["display"] == "1",
+            reason: values["reason"] ?? "Terminal"
+        )
+    }
+}
+
 final class LidModeController {
     private(set) var isEnabled = false
     private(set) var lastError: String?
@@ -169,6 +268,8 @@ final class LidModeController {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let awakeController = AwakeController()
+    private let stateStore = StateStore()
+    private let commandInbox = CommandInbox()
     private let lidModeController = LidModeController()
     private var statusItem: NSStatusItem?
     private let menu = NSMenu()
@@ -211,6 +312,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         statusItem.menu = menu
+        commandInbox.start { [weak self] command in
+            self?.apply(command: command)
+        }
         updateMenu()
     }
 
@@ -293,6 +397,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = lidModeController.isEnabled ? "Lid" : (awakeController.keepsDisplayAwake ? "Display" : (active ? "Awake" : "Ready"))
             button.toolTip = active ? "Don't Stop is keeping the Mac awake" : "Don't Stop is ready"
         }
+
+        stateStore.write(
+            active: active,
+            display: awakeController.keepsDisplayAwake,
+            lid: lidModeController.isEnabled,
+            remaining: awakeController.remainingText()
+        )
     }
 
     private var selectedDuration: DurationOption {
@@ -327,6 +438,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    private func apply(command: TerminalCommand) {
+        switch command.action {
+        case "on":
+            let duration = command.minutes.map { TimeInterval($0 * 60) }
+            _ = awakeController.start(duration: duration, reason: command.reason)
+            if command.display {
+                _ = awakeController.setDisplayAwake(true)
+            }
+        case "off":
+            if lidModeController.isEnabled {
+                _ = lidModeController.setEnabled(false)
+            }
+            awakeController.stop()
+        default:
+            break
+        }
+
+        updateMenu()
     }
 }
 

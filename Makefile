@@ -13,7 +13,7 @@ INFO_PLIST := Resources/Info.plist
 
 export MACOSX_DEPLOYMENT_TARGET := 13.0
 
-.PHONY: build run clean
+.PHONY: build run clean install-helper
 
 build:
 	@mkdir -p "$(MACOS_DIR)" "$(RESOURCES_DIR)" "$(MODULE_CACHE_DIR)"
@@ -27,3 +27,8 @@ run: build
 
 clean:
 	rm -rf "$(BUILD_DIR)" "$(DIST_DIR)" .build
+
+install-helper:
+	@mkdir -p "$(HOME)/.local/bin"
+	cp "bin/dont-stop" "$(HOME)/.local/bin/dont-stop"
+	@printf "Installed %s\n" "$(HOME)/.local/bin/dont-stop"
