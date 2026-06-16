@@ -135,13 +135,47 @@ final class AwakeController {
     }
 }
 
+final class LidModeController {
+    private(set) var isEnabled = false
+    private(set) var lastError: String?
+
+    func setEnabled(_ enabled: Bool) -> Bool {
+        lastError = nil
+
+        let value = enabled ? "1" : "0"
+        let script = "do shell script \"/usr/bin/pmset -a disablesleep \(value)\" with administrator privileges"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+
+        guard process.terminationStatus == 0 else {
+            lastError = "macOS did not allow the lid mode change."
+            return false
+        }
+
+        isEnabled = enabled
+        return true
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let awakeController = AwakeController()
+    private let lidModeController = LidModeController()
     private var statusItem: NSStatusItem?
     private let menu = NSMenu()
     private let titleItem = NSMenuItem(title: "Don't Stop", action: nil, keyEquivalent: "")
     private let toggleItem = NSMenuItem(title: "Keep Mac Awake", action: #selector(toggleAwake), keyEquivalent: "")
     private let displayItem = NSMenuItem(title: "Keep Display Awake", action: #selector(toggleDisplayAwake), keyEquivalent: "")
+    private let lidItem = NSMenuItem(title: "Run With Lid Closed", action: #selector(toggleLidMode), keyEquivalent: "")
     private let durationMenu = NSMenu()
     private let durationRootItem = NSMenuItem(title: "Auto Stop", action: nil, keyEquivalent: "")
     private var selectedDurationIndex = 0
@@ -164,6 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         displayItem.target = self
         menu.addItem(displayItem)
 
+        lidItem.target = self
+        menu.addItem(lidItem)
+
         configureDurationMenu()
         menu.addItem(durationRootItem)
 
@@ -175,6 +212,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         updateMenu()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if lidModeController.isEnabled {
+            _ = lidModeController.setEnabled(false)
+        }
     }
 
     @objc private func toggleAwake() {
@@ -206,7 +249,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateMenu()
     }
 
+    @objc private func toggleLidMode() {
+        let shouldEnable = !lidModeController.isEnabled
+
+        if shouldEnable && !confirmLidMode() {
+            return
+        }
+
+        if shouldEnable && !awakeController.isActive {
+            _ = awakeController.start(duration: selectedDuration.seconds)
+        }
+
+        if !lidModeController.setEnabled(shouldEnable) {
+            showLidModeError()
+        }
+
+        updateMenu()
+    }
+
     @objc private func quit() {
+        if lidModeController.isEnabled {
+            _ = lidModeController.setEnabled(false)
+        }
         awakeController.stop()
         NSApp.terminate(nil)
     }
@@ -218,6 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.state = active ? .on : .off
         displayItem.isEnabled = active
         displayItem.state = awakeController.keepsDisplayAwake ? .on : .off
+        lidItem.state = lidModeController.isEnabled ? .on : .off
         durationRootItem.title = active ? "Auto Stop: \(awakeController.remainingText())" : "Auto Stop"
 
         for item in durationMenu.items {
@@ -225,7 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let button = statusItem?.button {
-            button.title = awakeController.keepsDisplayAwake ? "Display" : (active ? "Awake" : "Ready")
+            button.title = lidModeController.isEnabled ? "Lid" : (awakeController.keepsDisplayAwake ? "Display" : (active ? "Awake" : "Ready"))
             button.toolTip = active ? "Don't Stop is keeping the Mac awake" : "Don't Stop is ready"
         }
     }
@@ -243,6 +308,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         durationRootItem.submenu = durationMenu
+    }
+
+    private func confirmLidMode() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Run with the lid closed?"
+        alert.informativeText = "This is opt-in because closed-lid running can increase heat. Use a hard surface with airflow, preferably on power, and turn it off when the run is done."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Turn On")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func showLidModeError() {
+        let alert = NSAlert()
+        alert.messageText = "Lid mode could not be changed"
+        alert.informativeText = lidModeController.lastError ?? "macOS did not allow the system power setting change."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 
