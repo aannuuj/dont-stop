@@ -17,7 +17,7 @@ export MACOSX_DEPLOYMENT_TARGET := 13.0
 
 build:
 	@mkdir -p "$(MACOS_DIR)" "$(RESOURCES_DIR)" "$(MODULE_CACHE_DIR)"
-	swiftc -O -target "$(SWIFT_TARGET)" -module-cache-path "$(MODULE_CACHE_DIR)" -framework AppKit -o "$(MACOS_DIR)/$(EXECUTABLE)" $(SOURCES)
+	swiftc -O -target "$(SWIFT_TARGET)" -module-cache-path "$(MODULE_CACHE_DIR)" -framework AppKit -framework IOKit -o "$(MACOS_DIR)/$(EXECUTABLE)" $(SOURCES)
 	@cp "$(INFO_PLIST)" "$(CONTENTS_DIR)/Info.plist"
 	@touch "$(APP_BUNDLE)"
 	@printf "Built %s\n" "$(APP_BUNDLE)"
