@@ -36,6 +36,8 @@ Normal awake mode is for preventing idle system sleep while the Mac is open.
 
 Lid-closed running is a separate opt-in mode. Use it only on a hard surface with airflow, preferably on power, and turn it off when the run is done.
 
+Read more: [Lid Mode Safety](docs/lid-mode.md)
+
 ## Repository
 
 Public repo:
