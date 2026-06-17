@@ -2,6 +2,8 @@
 
 Don't Stop includes a CLI helper and a small agent skill so Codex or Claude can keep long-running Mac tasks awake while they work.
 
+For all terminal flags and examples, see the [CLI reference](cli.md).
+
 ## Install The CLI Helper
 
 Install the menu bar app and the `dont-stop` terminal helper first:

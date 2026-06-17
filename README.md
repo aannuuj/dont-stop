@@ -2,6 +2,13 @@
 
 Don't Stop is a tiny macOS menu bar app that keeps the Mac awake using native `IOPMAssertion` power-management assertions.
 
+## Links
+
+- Repository: <https://github.com/aannuuj/dont-stop>
+- Commit history: <https://github.com/aannuuj/dont-stop/commits/master/>
+- CLI reference: [docs/cli.md](docs/cli.md)
+- Codex and Claude setup: [docs/agent-setup.md](docs/agent-setup.md)
+
 ## Build and Run
 
 ```sh
@@ -71,6 +78,8 @@ If the app crashes while lid mode is on, the next app launch detects Don't Stop'
 ## Terminal Helper
 
 The helper writes a command file to `~/Library/Application Support/DontStop/commands` and starts the app if needed.
+
+Full command reference: [docs/cli.md](docs/cli.md).
 
 ```sh
 ./bin/dont-stop on --minutes 180 --reason codex
