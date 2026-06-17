@@ -1,64 +1,139 @@
 # Don't Stop
 
-Don't Stop is a macOS menu bar app for keeping long-running AI coding sessions awake.
+Don't Stop is a tiny macOS menu bar app that keeps the Mac awake using native `IOPMAssertion` power-management assertions.
 
-It is built for people running tools like Codex, Claude Code, Cursor, and terminal agents on a MacBook. The goal is simple: start a long task, let the Mac stay available, and stop awake mode when the work is done.
+## Build and Run
 
-## Why
+```sh
+make test
+make build
+open "build/Don't Stop.app"
+```
 
-AI agents now run for longer than normal terminal commands. They may install dependencies, run tests, edit files, retry failures, or wait on slow builds. If macOS sleeps in the middle, the session can stall or fail while you are away from the keyboard.
+The menu bar item is a compact laptop icon with one status word: `Ready`, `Awake`, or `Lid`. Its tooltip and menu show whether the app is keeping the Mac awake.
 
-Existing keep-awake tools are useful, but Don't Stop is focused on the agent workflow:
+The menu bar control panel shows a compact frosted settings window:
 
-- keep the Mac awake while an agent runs
-- show the current state in the menu bar
-- support timed sessions for long tasks
-- optionally keep the display awake when needed
-- provide a command line helper for wrapping agent commands
-- keep lid-closed behavior explicit and opt-in
+- Stay awake while open: prevents normal idle sleep while the MacBook is open
+- Screen: let the display turn off, or keep it on
+- Stop after: choose when awake mode turns off
+- Run after lid closes: asks once for scoped permission, then switches lid mode without repeated prompts
 
-## Current Status
+Left-click the menu bar item to open the compact control panel. Right-click or Command-click it to open the settings menu.
 
-This repo is starting with a small native macOS implementation and will grow in focused steps:
+## Shortcuts
 
-1. menu bar app
-2. normal idle-sleep prevention
-3. screen sleep controls
-4. timers
-5. opt-in lid-closed mode
-6. command line helper
-7. Codex and Claude setup
-8. release packaging
+macOS does not let a regular menu bar app add its own third-party tile directly into Control Center. The closest supported path is a Shortcuts action that opens one of Don't Stop's URL commands:
+
+```text
+dont-stop://toggle
+dont-stop://on
+dont-stop://off
+dont-stop://settings
+dont-stop://lid-toggle
+dont-stop://lid-on
+dont-stop://lid-off
+dont-stop://display-toggle
+dont-stop://display-on
+dont-stop://display-off
+```
+
+In Shortcuts, create a shortcut with an `Open URLs` action and paste one of those URLs. Use a laptop icon and a short name like `Awake` or `Lid`.
+
+## Agent Skill
+
+The repo includes a portable `dont-stop` skill for Codex and Claude Code:
+
+```sh
+make install-skills
+```
+
+Codex can discover the repo skill from `.agents/skills/dont-stop`. Claude Code can discover the project alias from `.claude/skills/dont-stop`. The install target also copies the same skill to `~/.agents/skills/dont-stop` and `~/.claude/skills/dont-stop` for use outside this repo.
+
+See [docs/agent-setup.md](docs/agent-setup.md) for the GitHub-friendly setup steps.
+
+Use it in an agent prompt as `$dont-stop`, for example:
+
+```text
+Use $dont-stop to keep this long-running test command awake and clean it up afterward.
+```
+
+## Lid Close Behavior
+
+Don't Stop blocks normal idle sleep while the MacBook is open. Lid mode goes further: it lets long-running jobs continue after the lid closes by changing a system-level power setting.
+
+The first time you enable lid mode, macOS asks for admin permission and Don't Stop installs a narrowly scoped permission so future lid-mode switches do not ask again.
+
+Keep the Mac on a hard surface with airflow, preferably on power, and turn lid mode off when the long-running job is done. On Apple Silicon, lid-close behavior is partly hardware-gated, so reliability is best on power and even better with an external display attached.
+
+If the app crashes while lid mode is on, the next app launch detects Don't Stop's lid marker and tries to restore normal sleep behavior without prompting.
 
 ## Terminal Helper
 
-The helper can start or stop an awake session around a command:
+The helper writes a command file to `~/Library/Application Support/DontStop/commands` and starts the app if needed.
 
 ```sh
-./bin/dont-stop on
-./bin/dont-stop status
-./bin/dont-stop run -- codex
+./bin/dont-stop on --minutes 180 --reason codex
 ./bin/dont-stop off
+./bin/dont-stop status
+./bin/dont-stop lid status
 ```
 
-Install it to `~/.local/bin`:
+For Codex or Claude sessions, wrap the command so Don't Stop turns on for the process and turns off when it exits:
 
 ```sh
+./bin/dont-stop run -- codex
+./bin/dont-stop run -- claude
+```
+
+To also keep the Mac running with the lid closed for the lifetime of a terminal session:
+
+```sh
+./bin/dont-stop run --lid -- codex
+./bin/dont-stop run --lid -- claude
+```
+
+You can manage lid-closed running directly from Terminal:
+
+```sh
+./bin/dont-stop lid on
+./bin/dont-stop lid off
+./bin/dont-stop permission status
+./bin/dont-stop permission reset
+```
+
+To keep the display awake too:
+
+```sh
+./bin/dont-stop on --reason demo --display
+./bin/dont-stop run --display -- claude
+```
+
+## Optional Install
+
+```sh
+make install
 make install-helper
 ```
 
-## Safety
+`make install` copies the app to `~/Applications/Don't Stop.app`. `make install-helper` copies the terminal helper to `~/.local/bin/dont-stop`.
 
-Normal awake mode is for preventing idle system sleep while the Mac is open.
+If the helper lives somewhere else, point it at the app:
 
-Lid-closed running is a separate opt-in mode. Use it only on a hard surface with airflow, preferably on power, and turn it off when the run is done.
-
-Read more: [Lid Mode Safety](docs/lid-mode.md)
-
-## Repository
-
-Public repo:
-
-```text
-https://github.com/aannuuj/dont-stop
+```sh
+DONT_STOP_APP="$HOME/Applications/Don't Stop.app" dont-stop on --reason codex
 ```
+
+The app releases all assertions when you turn the mode off or quit the menu bar app.
+
+## Release Build
+
+```sh
+make test
+make release
+make dmg
+```
+
+`make release` creates an ad-hoc signed app in `dist/Don't Stop.app`. `make dmg` packages it as `dist/Don't Stop-<version>.dmg`. The app is not notarized yet, so first launch may still require Gatekeeper approval.
+
+For public distribution, use Developer ID signing and notarization. See [Release And Notarization](docs/notarization.md).

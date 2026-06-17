@@ -1,178 +1,475 @@
-#!/usr/bin/env bash
+#!/bin/zsh
 set -euo pipefail
 
 APP_NAME="Don't Stop.app"
-EXECUTABLE="DontStop"
+SCRIPT_DIR="${0:A:h}"
+DEFAULT_APP="${SCRIPT_DIR:h}/build/${APP_NAME}"
+APP_PATH="${DONT_STOP_APP:-$DEFAULT_APP}"
 SUPPORT_DIR="${HOME}/Library/Application Support/DontStop"
 COMMAND_DIR="${SUPPORT_DIR}/commands"
-STATE_FILE="${SUPPORT_DIR}/state"
-COMMAND_COUNTER=0
+STATE_FILE="${SUPPORT_DIR}/state.json"
+LID_STATE_FILE="${SUPPORT_DIR}/lid-sleep-state"
+PMSET="/usr/bin/pmset"
+SUDO="/usr/bin/sudo"
+SUDOERS_PATH="/etc/sudoers.d/dont-stop-disablesleep"
 
 usage() {
-  cat <<'USAGE'
+  /bin/cat <<'EOF'
 Usage:
-  dont-stop on [--minutes N] [--display] [--reason TEXT]
+  dont-stop on [--minutes N] [--reason TEXT] [--display|--no-display] [--lid]
   dont-stop off
+  dont-stop toggle [--minutes N] [--reason TEXT]
+  dont-stop run [--reason TEXT] [--display|--no-display] [--lid] -- COMMAND [ARGS...]
+  dont-stop lid on|off|status
+  dont-stop permission install|reset|status
   dont-stop status
-  dont-stop run [--minutes N] [--display] [--reason TEXT] -- COMMAND [ARGS...]
-USAGE
+
+Examples:
+  dont-stop on --minutes 180 --reason codex
+  dont-stop run --reason claude -- claude
+  dont-stop run --lid -- codex
+  dont-stop run -- codex
+  dont-stop lid on
+  dont-stop lid off
+  dont-stop permission install
+  dont-stop off
+
+Set DONT_STOP_APP=/path/to/Don't\ Stop.app if the app is not in build/.
+EOF
 }
 
-find_app() {
-  if [[ -n "${DONT_STOP_APP:-}" && -d "${DONT_STOP_APP}" ]]; then
-    printf '%s\n' "${DONT_STOP_APP}"
+resolve_app() {
+  if [[ -d "$APP_PATH" ]]; then
+    /usr/bin/printf "%s" "$APP_PATH"
     return 0
   fi
 
-  local candidates=(
-    "$(pwd)/build/${APP_NAME}"
-    "${HOME}/Applications/${APP_NAME}"
-    "/Applications/${APP_NAME}"
-  )
+  if [[ -d "/Applications/${APP_NAME}" ]]; then
+    /usr/bin/printf "%s" "/Applications/${APP_NAME}"
+    return 0
+  fi
 
-  for app in "${candidates[@]}"; do
-    if [[ -d "${app}" ]]; then
-      printf '%s\n' "${app}"
-      return 0
-    fi
-  done
+  if [[ -d "${HOME}/Applications/${APP_NAME}" ]]; then
+    /usr/bin/printf "%s" "${HOME}/Applications/${APP_NAME}"
+    return 0
+  fi
 
+  /usr/bin/printf "Don't Stop.app was not found. Run 'make build' first, or set DONT_STOP_APP.\n" >&2
   return 1
 }
 
 ensure_app_running() {
-  if /usr/bin/pgrep -x "${EXECUTABLE}" >/dev/null 2>&1; then
+  local app
+  app="$(resolve_app)"
+  /usr/bin/open -gj "$app"
+}
+
+base64_reason() {
+  /usr/bin/printf "%s" "$1" | /usr/bin/base64 | /usr/bin/tr -d '\n'
+}
+
+shell_quote() {
+  local value="$1"
+  /usr/bin/printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
+apple_script_literal() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  /usr/bin/printf "\"%s\"" "$value"
+}
+
+run_admin_shell_command() {
+  local command="$1"
+  local literal
+  literal="$(apple_script_literal "$command")"
+  /usr/bin/osascript -e "do shell script ${literal} with administrator privileges"
+}
+
+sudoers_escaped_user_name() {
+  /usr/bin/printf "%s" "$1" | /usr/bin/sed -e 's/[\\ ,:=@]/\\&/g'
+}
+
+sudoers_rule() {
+  local user
+  user="$(sudoers_escaped_user_name "${USER}")"
+  /usr/bin/printf "%s ALL=(root) NOPASSWD: %s -a disablesleep 1, %s -a disablesleep 0" "$user" "$PMSET" "$PMSET"
+}
+
+install_passwordless_lid_assist() {
+  local rule
+  local command
+  rule="$(sudoers_rule)"
+  command=$(/bin/cat <<EOF
+set -e
+tmp="\$(/usr/bin/mktemp /tmp/dont-stop-sudoers.XXXXXX)"
+/usr/bin/printf "%s\\n" $(shell_quote "$rule") > "\$tmp"
+/usr/sbin/visudo -cf "\$tmp"
+/usr/sbin/chown root:wheel "\$tmp"
+/bin/chmod 0440 "\$tmp"
+/bin/mv "\$tmp" $(shell_quote "$SUDOERS_PATH")
+EOF
+)
+  run_admin_shell_command "$command"
+}
+
+reset_passwordless_lid_assist() {
+  run_admin_shell_command "/bin/rm -f $(shell_quote "$SUDOERS_PATH")"
+}
+
+ensure_passwordless_lid_assist() {
+  if [[ -f "$SUDOERS_PATH" ]]; then
     return 0
   fi
 
-  local app
-  app="$(find_app)" || {
-    echo "Don't Stop.app was not found. Build or install it first." >&2
-    exit 66
-  }
+  /usr/bin/printf "Installing one-time scoped lid permission for exactly these commands:\n  %s\n  %s\n" \
+    "$PMSET -a disablesleep 1" \
+    "$PMSET -a disablesleep 0" >&2
+  install_passwordless_lid_assist
+}
 
-  /usr/bin/open "${app}"
-  sleep 0.4
+set_disable_sleep() {
+  local enabled="$1"
+  local value="0"
+  [[ "$enabled" == "1" ]] && value="1"
+
+  if "$SUDO" -n "$PMSET" -a disablesleep "$value" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  ensure_passwordless_lid_assist
+  "$SUDO" -n "$PMSET" -a disablesleep "$value"
 }
 
 send_command() {
-  local action="$1"
-  local minutes="${2:-}"
-  local display="${3:-0}"
-  local reason="${4:-Terminal}"
+  local command="$1"
+  local minutes="$2"
+  local reason="$3"
+  local display="$4"
+  local id
+  local file
+
+  /bin/mkdir -p "$COMMAND_DIR"
+  id="$(/bin/date +%Y%m%d%H%M%S)-$$-${RANDOM}"
+  file="${COMMAND_DIR}/${id}.command"
+
+  {
+    /usr/bin/printf "command=%s\n" "$command"
+    if [[ -n "$minutes" ]]; then
+      /usr/bin/printf "minutes=%s\n" "$minutes"
+    fi
+    if [[ -n "$display" ]]; then
+      /usr/bin/printf "display=%s\n" "$display"
+    fi
+    /usr/bin/printf "reasonBase64=%s\n" "$(base64_reason "$reason")"
+  } > "$file"
 
   ensure_app_running
-  /bin/mkdir -p "${COMMAND_DIR}"
-
-  local file
-  COMMAND_COUNTER=$((COMMAND_COUNTER + 1))
-  file="${COMMAND_DIR}/$(date +%s)-$$-$(printf '%03d' "${COMMAND_COUNTER}")-${action}"
-  {
-    printf 'action=%s\n' "${action}"
-    printf 'display=%s\n' "${display}"
-    printf 'reason=%s\n' "${reason}"
-    if [[ -n "${minutes}" ]]; then
-      printf 'minutes=%s\n' "${minutes}"
-    fi
-  } > "${file}"
 }
 
-print_status() {
-  if [[ ! -f "${STATE_FILE}" ]]; then
-    echo "Don't Stop status is not available yet."
+read_current_sleep_timers() {
+  local section=""
+  current_battery_sleep=""
+  current_ac_sleep=""
+
+  while IFS= read -r line; do
+    case "$line" in
+      "Battery Power:"*)
+        section="battery"
+        ;;
+      "AC Power:"*)
+        section="ac"
+        ;;
+      *)
+        if [[ "$line" =~ '^[[:space:]]*sleep[[:space:]]+([0-9]+)' ]]; then
+          case "$section" in
+            battery) current_battery_sleep="${match[1]}" ;;
+            ac) current_ac_sleep="${match[1]}" ;;
+          esac
+        fi
+        ;;
+    esac
+  done < <(/usr/bin/pmset -g custom)
+}
+
+save_lid_snapshot_if_needed() {
+  /bin/mkdir -p "$SUPPORT_DIR"
+
+  if [[ -f "$LID_STATE_FILE" ]]; then
+    return 0
+  fi
+
+  {
+    /usr/bin/printf "mode=disablesleep\n"
+    /usr/bin/printf "enabledAt=%s\n" "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } > "$LID_STATE_FILE"
+}
+
+saved_lid_value() {
+  local key="$1"
+  if [[ ! -f "$LID_STATE_FILE" ]]; then
+    return 1
+  fi
+  /usr/bin/awk -F= -v key="$key" '$1 == key { print $2; exit }' "$LID_STATE_FILE"
+}
+
+enable_lid_assist() {
+  /usr/bin/printf "Lid-closed mode changes a global macOS power setting. Apple Silicon reliability is best on power with airflow.\n" >&2
+  set_disable_sleep 1
+  save_lid_snapshot_if_needed
+  /usr/bin/printf "Lid-closed running is on. Keep the Mac on a hard surface with airflow.\n"
+}
+
+restore_lid_assist() {
+  local battery_sleep
+  local ac_sleep
+
+  if [[ ! -f "$LID_STATE_FILE" ]]; then
+    /usr/bin/printf "No lid-closed running marker found. Nothing to restore.\n" >&2
     return 1
   fi
 
-  local active display lid remaining
-  active="$(awk -F= '$1 == "active" {print $2}' "${STATE_FILE}")"
-  display="$(awk -F= '$1 == "display" {print $2}' "${STATE_FILE}")"
-  lid="$(awk -F= '$1 == "lid" {print $2}' "${STATE_FILE}")"
-  remaining="$(awk -F= '$1 == "remaining" {print $2}' "${STATE_FILE}")"
+  battery_sleep="$(saved_lid_value battery || true)"
+  ac_sleep="$(saved_lid_value ac || true)"
 
-  [[ "${active}" == "1" ]] && echo "awake: on" || echo "awake: off"
-  [[ "${display}" == "1" ]] && echo "display: on" || echo "display: sleep allowed"
-  [[ "${lid}" == "1" ]] && echo "lid mode: on" || echo "lid mode: off"
-  echo "auto stop: ${remaining:-unknown}"
+  /usr/bin/printf "Turning off lid-closed running.\n" >&2
+  set_disable_sleep 0
+
+  if [[ -n "$battery_sleep" || -n "$ac_sleep" ]]; then
+    /usr/bin/printf "Restoring legacy saved sleep timers.\n" >&2
+  fi
+  if [[ -n "$battery_sleep" ]]; then
+    "$SUDO" "$PMSET" -b sleep "$battery_sleep"
+  fi
+  if [[ -n "$ac_sleep" ]]; then
+    "$SUDO" "$PMSET" -c sleep "$ac_sleep"
+  fi
+
+  /bin/rm -f "$LID_STATE_FILE"
+  /usr/bin/printf "Lid-closed running is off.\n"
+}
+
+print_lid_status() {
+  read_current_sleep_timers
+  /usr/bin/printf "Current sleep timers: battery=%s ac=%s\n" "${current_battery_sleep:-unknown}" "${current_ac_sleep:-unknown}"
+  if [[ -f "$LID_STATE_FILE" ]]; then
+    /usr/bin/printf "Lid-closed running marker: %s\n" "$LID_STATE_FILE"
+  else
+    /usr/bin/printf "Lid-closed running marker: none\n"
+  fi
 }
 
 parse_options() {
-  MINUTES=""
-  DISPLAY="0"
-  REASON="Terminal"
+  minutes=""
+  reason="Terminal"
+  display=""
+  lid=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --minutes)
-        if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "--minutes requires a number of minutes" >&2
-          exit 64
-        fi
-        MINUTES="${2:-}"
-        if ! [[ "${MINUTES}" =~ ^[0-9]+$ ]]; then
-          echo "--minutes must be a positive integer" >&2
-          exit 64
-        fi
+      --minutes|-m)
+        [[ $# -ge 2 ]] || { /usr/bin/printf "Missing value for %s\n" "$1" >&2; return 2; }
+        minutes="$2"
+        shift 2
+        ;;
+      --reason|-r)
+        [[ $# -ge 2 ]] || { /usr/bin/printf "Missing value for %s\n" "$1" >&2; return 2; }
+        reason="$2"
         shift 2
         ;;
       --display)
-        DISPLAY="1"
+        display="1"
         shift
         ;;
-      --reason)
-        if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
-          echo "--reason requires text" >&2
-          exit 64
-        fi
-        REASON="${2:-Terminal}"
-        shift 2
+      --no-display)
+        display="0"
+        shift
+        ;;
+      --lid)
+        lid="1"
+        shift
         ;;
       --)
         shift
-        COMMAND=("$@")
-        return 0
+        break
         ;;
       *)
-        break
+        /usr/bin/printf "Unknown option: %s\n" "$1" >&2
+        return 2
         ;;
     esac
   done
 
-  COMMAND=("$@")
+  return 0
 }
 
-main() {
-  local command="${1:-}"
-  [[ $# -gt 0 ]] && shift || true
+command="${1:-help}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
-  case "${command}" in
-    on)
-      parse_options "$@"
-      send_command "on" "${MINUTES}" "${DISPLAY}" "${REASON}"
-      ;;
-    off)
-      send_command "off"
-      ;;
-    status)
-      print_status
-      ;;
-    run)
-      parse_options "$@"
-      if [[ ${#COMMAND[@]} -eq 0 ]]; then
-        usage >&2
-        exit 64
-      fi
-      send_command "on" "${MINUTES}" "${DISPLAY}" "${REASON}"
-      trap 'send_command "off" >/dev/null 2>&1 || true' EXIT
-      "${COMMAND[@]}"
-      ;;
-    ""|-h|--help|help)
-      usage
-      ;;
-    *)
+case "$command" in
+  on|start|high|activate)
+    parse_options "$@"
+    if [[ "${lid:-}" == "1" ]]; then
+      enable_lid_assist
+    fi
+    send_command "on" "$minutes" "$reason" "$display"
+    /usr/bin/printf "Don't Stop is keeping this Mac awake"
+    if [[ -n "$minutes" ]]; then
+      /usr/bin/printf " for %s minutes" "$minutes"
+    fi
+    /usr/bin/printf ".\n"
+    ;;
+
+  off|stop|low|deactivate)
+    send_command "off" "" "Terminal" ""
+    /usr/bin/printf "Don't Stop stopped. This Mac can sleep normally.\n"
+    ;;
+
+  toggle)
+    parse_options "$@"
+    send_command "toggle" "$minutes" "$reason" "$display"
+    /usr/bin/printf "Don't Stop toggle sent.\n"
+    ;;
+
+  run)
+    minutes=""
+    reason="Terminal"
+    display=""
+    lid=""
+    restore_lid_on_cleanup="0"
+
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --reason|-r)
+          [[ $# -ge 2 ]] || { /usr/bin/printf "Missing value for %s\n" "$1" >&2; exit 2; }
+          reason="$2"
+          shift 2
+          ;;
+        --display)
+          display="1"
+          shift
+          ;;
+        --no-display)
+          display="0"
+          shift
+          ;;
+        --lid)
+          lid="1"
+          shift
+          ;;
+        --)
+          shift
+          break
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done
+
+    if [[ $# -eq 0 ]]; then
       usage >&2
-      exit 64
-      ;;
-  esac
-}
+      exit 2
+    fi
 
-main "$@"
+    if [[ "$reason" == "Terminal" ]]; then
+      reason="session: $*"
+    fi
+
+    if [[ "$lid" == "1" ]]; then
+      if [[ ! -f "$LID_STATE_FILE" ]]; then
+        restore_lid_on_cleanup="1"
+      fi
+      enable_lid_assist
+    fi
+
+    send_command "on" "" "$reason" "$display"
+    /usr/bin/printf "Don't Stop is keeping this Mac awake for: %s\n" "$*"
+
+    cleanup() {
+      send_command "off" "" "session ended" "" >/dev/null 2>&1 || true
+      if [[ "$restore_lid_on_cleanup" == "1" ]]; then
+        restore_lid_assist >/dev/null 2>&1 || true
+      fi
+    }
+    trap cleanup EXIT INT TERM
+
+    set +e
+    "$@"
+    exit_code=$?
+    set -e
+
+    trap - EXIT INT TERM
+    cleanup
+    /usr/bin/printf "Session ended. Don't Stop stopped.\n"
+    exit "$exit_code"
+    ;;
+
+  lid)
+    subcommand="${1:-status}"
+    case "$subcommand" in
+      on|enable|start)
+        enable_lid_assist
+        ;;
+      off|disable|stop|restore)
+        restore_lid_assist
+        ;;
+      status)
+        print_lid_status
+        ;;
+      *)
+        /usr/bin/printf "Unknown lid command: %s\n" "$subcommand" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
+
+  permission|permissions)
+    subcommand="${1:-status}"
+    case "$subcommand" in
+      install|enable)
+        install_passwordless_lid_assist
+        /usr/bin/printf "Installed scoped lid permission at %s\n" "$SUDOERS_PATH"
+        ;;
+      reset|remove|uninstall|disable)
+        reset_passwordless_lid_assist
+        /usr/bin/printf "Removed scoped lid permission at %s\n" "$SUDOERS_PATH"
+        ;;
+      status)
+        if [[ -f "$SUDOERS_PATH" ]]; then
+          /usr/bin/printf "Scoped lid permission is installed at %s\n" "$SUDOERS_PATH"
+        else
+          /usr/bin/printf "Scoped lid permission is not installed.\n"
+        fi
+        ;;
+      *)
+        /usr/bin/printf "Unknown permission command: %s\n" "$subcommand" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
+
+  status)
+    if [[ -f "$STATE_FILE" ]]; then
+      /bin/cat "$STATE_FILE"
+      /usr/bin/printf "\n"
+    else
+      /usr/bin/printf "No Don't Stop status has been written yet. Start the app once with 'make run'.\n"
+    fi
+    ;;
+
+  help|-h|--help)
+    usage
+    ;;
+
+  *)
+    /usr/bin/printf "Unknown command: %s\n" "$command" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,1840 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Don't Stop - keep Mac agent runs alive</title>
+  <meta name="description" content="Don't Stop is a native macOS menu bar app for keeping Codex, Claude Code, Cursor, and long terminal jobs running when your Mac would normally sleep.">
+  <script>document.documentElement.classList.add("js");</script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --canvas: #f5f3ee;
+      --canvas-alt: #ebe8df;
+      --ink: #141414;
+      --muted: #6d6960;
+      --faint: #948f83;
+      --line: rgba(20, 20, 20, 0.12);
+      --line-strong: rgba(20, 20, 20, 0.2);
+      --glass: rgba(255, 255, 255, 0.62);
+      --glass-strong: rgba(255, 255, 255, 0.78);
+      --glass-deep: rgba(255, 255, 255, 0.9);
+      --black: #0d0d0d;
+      --blue: #007aff;
+      --green: #16884f;
+      --amber: #c97814;
+      --rose: #bb4b5d;
+      --shadow-soft: 0 22px 60px rgba(42, 39, 32, 0.13);
+      --shadow-window: 0 36px 90px rgba(28, 25, 20, 0.2);
+      --radius: 20px;
+      --max: 1120px;
+      --mx: 0;
+      --my: 0;
+      --scroll: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, system-ui, sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas: #0e0f0f;
+        --canvas-alt: #171817;
+        --ink: #f4f1eb;
+        --muted: #aaa59b;
+        --faint: #817c73;
+        --line: rgba(255, 255, 255, 0.12);
+        --line-strong: rgba(255, 255, 255, 0.22);
+        --glass: rgba(39, 40, 38, 0.58);
+        --glass-strong: rgba(49, 50, 47, 0.74);
+        --glass-deep: rgba(57, 58, 54, 0.9);
+        --black: #f3efe7;
+        --shadow-soft: 0 22px 70px rgba(0, 0, 0, 0.34);
+        --shadow-window: 0 40px 100px rgba(0, 0, 0, 0.42);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--canvas);
+    }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: inherit;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .page {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .container {
+      width: min(var(--max), calc(100% - 44px));
+      margin: 0 auto;
+    }
+
+    .glass {
+      border: 1px solid var(--line);
+      background: var(--glass);
+      backdrop-filter: saturate(180%) blur(24px);
+      -webkit-backdrop-filter: saturate(180%) blur(24px);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.05),
+        var(--shadow-soft);
+    }
+
+    .nav {
+      position: sticky;
+      top: 14px;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 14px;
+      padding: 9px 10px;
+      border-radius: 999px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding-left: 4px;
+      font-size: 15px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 11px;
+      border: 1px solid var(--line-strong);
+      background: var(--glass-deep);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    }
+
+    .brand-mark svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 680;
+    }
+
+    .nav-links a {
+      padding: 8px 11px;
+      border-radius: 999px;
+      transition: background 180ms ease, color 180ms ease;
+    }
+
+    .nav-links a:hover {
+      background: color-mix(in srgb, var(--ink), transparent 92%);
+      color: var(--ink);
+    }
+
+    .nav-cta {
+      color: var(--canvas) !important;
+      background: var(--ink) !important;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 760px;
+      padding: 82px 0 46px;
+      display: grid;
+      align-items: end;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 72px 0 auto;
+      height: 500px;
+      background-image:
+        linear-gradient(90deg, rgba(128, 128, 128, 0.08) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(128, 128, 128, 0.07) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.45) 20%, transparent 92%);
+      pointer-events: none;
+    }
+
+    .hero-stage {
+      position: absolute;
+      left: 50%;
+      top: 64px;
+      width: min(1120px, calc(100% - 28px));
+      height: 500px;
+      transform:
+        translateX(-50%)
+        translate3d(
+          calc(var(--mx) * -10px),
+          calc((var(--my) * -8px) + (var(--scroll) * -34px)),
+          0
+        );
+      transition: transform 220ms ease-out;
+      pointer-events: none;
+    }
+
+    .desktop-shell {
+      position: absolute;
+      inset: 12px 0 0;
+      border: 1px solid var(--line);
+      border-radius: 38px;
+      background: color-mix(in srgb, var(--canvas-alt), white 16%);
+      box-shadow: var(--shadow-window);
+      overflow: hidden;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .desktop-shell {
+        background: color-mix(in srgb, var(--canvas-alt), black 10%);
+      }
+    }
+
+    .desktop-shell::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(115deg, rgba(255, 255, 255, 0.24), transparent 28%),
+        linear-gradient(260deg, rgba(255, 255, 255, 0.12), transparent 34%);
+      opacity: 0.82;
+      pointer-events: none;
+    }
+
+    .menu-strip {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      top: 16px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 40px;
+      padding: 0 12px;
+      border-radius: 15px;
+      font-size: 12px;
+      font-weight: 720;
+      color: var(--muted);
+    }
+
+    .menu-left,
+    .menu-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .menu-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 9px;
+      border-radius: 9px;
+      color: #f5f3ee;
+      background: #0f0f0f;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    }
+
+    .menu-chip svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    .menu-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: var(--glass-strong);
+      color: var(--ink);
+    }
+
+    .menu-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 5px color-mix(in srgb, var(--green), transparent 84%);
+    }
+
+    .hero-panel {
+      position: absolute;
+      right: 76px;
+      top: 82px;
+      z-index: 4;
+      width: 346px;
+      padding: 13px;
+      border-radius: 27px;
+      animation: float-panel 6.4s ease-in-out infinite;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 4px 6px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 720;
+    }
+
+    .panel-title strong {
+      color: var(--ink);
+      font-size: 15px;
+    }
+
+    .panel-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+      align-items: center;
+      min-height: 58px;
+      padding: 11px 6px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-row:last-child {
+      border-bottom: 0;
+    }
+
+    .panel-label {
+      display: block;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 780;
+    }
+
+    .panel-copy {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 640;
+      line-height: 1.3;
+    }
+
+    .switch {
+      width: 48px;
+      height: 29px;
+      padding: 3px;
+      border-radius: 999px;
+      background: #111;
+      box-shadow:
+        inset 0 0 0 2px rgba(255, 255, 255, 0.13),
+        0 1px 8px rgba(0, 0, 0, 0.18);
+    }
+
+    .switch::after {
+      content: "";
+      display: block;
+      width: 23px;
+      height: 23px;
+      margin-left: auto;
+      border-radius: 50%;
+      background: #f7f7f4;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, 0.25);
+    }
+
+    .switch.off {
+      background: color-mix(in srgb, var(--ink), transparent 84%);
+    }
+
+    .switch.off::after {
+      margin-left: 0;
+    }
+
+    .segmented,
+    .select-pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--ink), transparent 88%);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .segmented {
+      padding: 3px;
+    }
+
+    .segmented span {
+      min-width: 66px;
+      padding: 6px 9px;
+      border-radius: 9px;
+      text-align: center;
+    }
+
+    .segmented .active {
+      color: white;
+      background: var(--blue);
+    }
+
+    .select-pill {
+      min-width: 116px;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      color: var(--ink);
+      background: color-mix(in srgb, var(--ink), transparent 88%);
+    }
+
+    .terminal-window {
+      position: absolute;
+      left: 72px;
+      top: 120px;
+      z-index: 3;
+      width: 462px;
+      border-radius: 20px;
+      overflow: hidden;
+      background: #10100f;
+      color: #f3efe7;
+      box-shadow: var(--shadow-window);
+      animation: float-terminal 7.2s ease-in-out infinite;
+    }
+
+    .terminal-top {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 40px;
+      padding: 0 14px;
+      background: #1b1b19;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .terminal-top i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #6b6962;
+    }
+
+    .terminal-body {
+      padding: 17px;
+      font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.75;
+      color: #cfc9bd;
+    }
+
+    .terminal-body .green {
+      color: #83e6a4;
+    }
+
+    .terminal-body .blue {
+      color: #86bdff;
+    }
+
+    .terminal-caret {
+      display: inline-block;
+      width: 7px;
+      height: 14px;
+      margin-left: 2px;
+      vertical-align: -2px;
+      background: #f3efe7;
+      animation: blink 1s steps(1) infinite;
+    }
+
+    .progress-card {
+      position: absolute;
+      left: 45%;
+      bottom: 42px;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: center;
+      width: 282px;
+      padding: 14px;
+      border-radius: 19px;
+      animation: float-status 5.6s ease-in-out infinite;
+    }
+
+    .pulse {
+      position: relative;
+      width: 37px;
+      height: 37px;
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--green), transparent 82%);
+    }
+
+    .pulse::after {
+      content: "";
+      position: absolute;
+      inset: 11px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-out infinite;
+    }
+
+    .progress-card strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .progress-card span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .shortcut-tile {
+      position: absolute;
+      right: 74px;
+      bottom: 54px;
+      z-index: 3;
+      width: 142px;
+      height: 142px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      border-radius: 32px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 760;
+      animation: float-shortcut 6.8s ease-in-out infinite;
+    }
+
+    .shortcut-tile svg {
+      display: block;
+      width: 32px;
+      height: 32px;
+      margin: 0 auto 10px;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 10;
+      width: min(760px, 100%);
+      padding-top: 410px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 5px color-mix(in srgb, var(--green), transparent 84%);
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+      font-size: 100px;
+      line-height: 0.9;
+      letter-spacing: 0;
+      font-weight: 840;
+    }
+
+    .hero-subtitle {
+      max-width: 690px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 21px;
+      line-height: 1.32;
+      font-weight: 560;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 30px;
+    }
+
+    .agent-setup-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      width: fit-content;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 720;
+      text-decoration: none;
+    }
+
+    .agent-setup-link:hover {
+      color: var(--ink);
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 48px;
+      padding: 0 19px;
+      border: 1px solid var(--line-strong);
+      border-radius: 13px;
+      font-size: 14px;
+      font-weight: 760;
+      white-space: nowrap;
+      transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+    }
+
+    .button.primary {
+      border-color: transparent;
+      background: var(--ink);
+      color: var(--canvas);
+      box-shadow: 0 14px 28px rgba(0, 0, 0, 0.16);
+    }
+
+    .button.secondary {
+      background: var(--glass);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+    }
+
+    .proof-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 23px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 690;
+    }
+
+    .proof-row span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--glass), transparent 10%);
+      backdrop-filter: saturate(160%) blur(18px);
+      -webkit-backdrop-filter: saturate(160%) blur(18px);
+    }
+
+    .proof-row span::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.55;
+    }
+
+    .section {
+      position: relative;
+      z-index: 2;
+      padding: 88px 0;
+    }
+
+    .section.alt {
+      background: var(--canvas-alt);
+    }
+
+    #why {
+      padding-top: 60px;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 28px;
+      margin-bottom: 30px;
+    }
+
+    .section-heading h2 {
+      max-width: 720px;
+      margin-bottom: 0;
+      font-size: 58px;
+      line-height: 1;
+      letter-spacing: 0;
+      font-weight: 830;
+    }
+
+    .section-heading p {
+      max-width: 380px;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.48;
+      font-weight: 560;
+    }
+
+    .logo-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .logo-pill {
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--glass), transparent 12%);
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 780;
+    }
+
+    .logo-pill b {
+      color: var(--ink);
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .feature-card {
+      min-height: 236px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--glass-strong);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .feature-card.large {
+      grid-column: span 2;
+      display: grid;
+      grid-template-columns: 1.04fr 0.96fr;
+      gap: 26px;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .feature-kicker {
+      display: inline-flex;
+      margin-bottom: 16px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--blue), transparent 88%);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 780;
+    }
+
+    .feature-card h3 {
+      margin-bottom: 10px;
+      font-size: 24px;
+      line-height: 1.12;
+      letter-spacing: 0;
+      font-weight: 820;
+    }
+
+    .feature-card p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.48;
+      font-weight: 540;
+    }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--ink), transparent 92%);
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 22px;
+      font-weight: 830;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 680;
+    }
+
+    .mini-panel {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--glass);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+      overflow: hidden;
+    }
+
+    .mini-panel-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .mini-panel-row:last-child {
+      border-bottom: 0;
+    }
+
+    .mini-panel-row span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .workflow {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .workflow-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--glass-strong);
+    }
+
+    .step-number {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      background: var(--ink);
+      color: var(--canvas);
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    .step h3 {
+      margin-bottom: 5px;
+      font-size: 18px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .step p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 540;
+    }
+
+    .code-window {
+      min-height: 100%;
+      border-radius: 22px;
+      overflow: hidden;
+      background: #10100f;
+      color: #f4f1eb;
+      box-shadow: var(--shadow-window);
+    }
+
+    .code-top {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 42px;
+      padding: 0 15px;
+      background: #1d1d1b;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .code-top i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #6d6960;
+    }
+
+    pre {
+      margin: 0;
+      padding: 20px;
+      white-space: pre-wrap;
+      font-family: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.75;
+      color: #cfc9bd;
+    }
+
+    .blue {
+      color: #86bdff;
+    }
+
+    .green {
+      color: #82e9a5;
+    }
+
+    .amber {
+      color: #f4be72;
+    }
+
+    .safety-layout {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .safety-copy {
+      padding: 28px;
+      border-radius: 24px;
+    }
+
+    .safety-copy h3 {
+      margin-bottom: 12px;
+      font-size: 34px;
+      line-height: 1.06;
+      letter-spacing: 0;
+    }
+
+    .safety-copy p {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.5;
+      font-weight: 540;
+    }
+
+    .safety-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .safety-item {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 11px;
+      align-items: start;
+      padding: 14px;
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--ink), transparent 94%);
+    }
+
+    .safety-icon {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--green), transparent 84%);
+      color: var(--green);
+      font-size: 15px;
+      font-weight: 820;
+    }
+
+    .safety-item strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 14px;
+    }
+
+    .safety-item span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+      font-weight: 560;
+    }
+
+    .compare-table {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      overflow: hidden;
+      background: var(--glass-strong);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .compare-row {
+      display: grid;
+      grid-template-columns: 1.2fr repeat(3, 1fr);
+      min-height: 70px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .compare-row:last-child {
+      border-bottom: 0;
+    }
+
+    .compare-cell {
+      display: flex;
+      align-items: center;
+      padding: 16px 18px;
+      border-right: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+      font-weight: 630;
+    }
+
+    .compare-cell:last-child {
+      border-right: 0;
+    }
+
+    .compare-cell strong {
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .compare-cell.good {
+      color: var(--green);
+      font-weight: 780;
+    }
+
+    .compare-head {
+      background: color-mix(in srgb, var(--ink), transparent 94%);
+    }
+
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+
+    .faq-item {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--glass-strong);
+    }
+
+    .faq-item h3 {
+      margin-bottom: 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .faq-item p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.48;
+      font-weight: 540;
+    }
+
+    .cta {
+      position: relative;
+      z-index: 2;
+      padding: 88px 0 34px;
+    }
+
+    .cta-card {
+      min-height: 330px;
+      display: grid;
+      align-items: end;
+      padding: 34px;
+      border-radius: 30px;
+      background:
+        linear-gradient(135deg, color-mix(in srgb, var(--ink), transparent 2%), color-mix(in srgb, var(--ink), transparent 18%));
+      color: var(--canvas);
+      overflow: hidden;
+      box-shadow: var(--shadow-window);
+    }
+
+    .cta-card h2 {
+      max-width: 760px;
+      margin-bottom: 14px;
+      font-size: 58px;
+      line-height: 1;
+      letter-spacing: 0;
+      font-weight: 830;
+    }
+
+    .cta-card p {
+      max-width: 620px;
+      margin-bottom: 26px;
+      color: color-mix(in srgb, var(--canvas), transparent 24%);
+      font-size: 18px;
+      line-height: 1.45;
+      font-weight: 560;
+    }
+
+    .cta-card .button.primary {
+      background: var(--canvas);
+      color: var(--ink);
+    }
+
+    .cta-card .button.secondary {
+      border-color: rgba(255, 255, 255, 0.24);
+      color: var(--canvas);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    footer {
+      padding: 26px 0 36px;
+      color: var(--faint);
+      font-size: 13px;
+      font-weight: 620;
+    }
+
+    footer .container {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .reveal {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .js .reveal {
+      opacity: 0;
+      transform: translateY(22px);
+      transition: opacity 700ms ease, transform 700ms ease;
+    }
+
+    .js .reveal.visible,
+    .js #why .reveal,
+    .hero-copy.reveal {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @keyframes float-panel {
+      0%, 100% { transform: translate3d(0, 0, 0); }
+      50% { transform: translate3d(0, -11px, 0); }
+    }
+
+    @keyframes float-terminal {
+      0%, 100% { transform: translate3d(0, 3px, 0); }
+      50% { transform: translate3d(0, -8px, 0); }
+    }
+
+    @keyframes float-status {
+      0%, 100% { transform: translate3d(0, 0, 0); }
+      50% { transform: translate3d(0, -9px, 0); }
+    }
+
+    @keyframes float-shortcut {
+      0%, 100% { transform: translate3d(0, 2px, 0); }
+      50% { transform: translate3d(0, -7px, 0); }
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green), transparent 48%); }
+      70% { box-shadow: 0 0 0 13px color-mix(in srgb, var(--green), transparent 100%); }
+      100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green), transparent 100%); }
+    }
+
+    @keyframes blink {
+      0%, 48% { opacity: 1; }
+      49%, 100% { opacity: 0; }
+    }
+
+
+    @media (max-width: 960px) {
+      .hero {
+        min-height: 760px;
+        padding-top: 72px;
+      }
+
+      .hero-stage {
+        top: 74px;
+        height: 460px;
+      }
+
+      .terminal-window {
+        left: 24px;
+        top: 128px;
+        width: 390px;
+      }
+
+      .hero-panel {
+        right: 24px;
+        top: 82px;
+        width: 318px;
+      }
+
+      .progress-card {
+        left: 28px;
+        bottom: 48px;
+      }
+
+      .shortcut-tile {
+        right: 28px;
+        bottom: 48px;
+      }
+
+      .hero-copy {
+        padding-top: 438px;
+      }
+
+      h1 {
+        font-size: 68px;
+      }
+
+      .hero-subtitle {
+        font-size: 18px;
+      }
+
+      .proof-row {
+        display: none;
+      }
+
+      .section-heading {
+        display: block;
+      }
+
+      .section-heading h2,
+      .cta-card h2 {
+        font-size: 46px;
+      }
+
+      .section-heading p {
+        margin-top: 14px;
+      }
+
+      .feature-grid,
+      .workflow,
+      .safety-layout,
+      .faq-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .feature-card.large {
+        grid-column: auto;
+        grid-template-columns: 1fr;
+      }
+
+      .logo-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .compare-table {
+        overflow-x: auto;
+      }
+
+      .compare-row {
+        min-width: 760px;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .container {
+        width: min(var(--max), calc(100% - 28px));
+      }
+
+      .nav {
+        top: 10px;
+        margin-top: 10px;
+      }
+
+      .nav-links a:not(.nav-cta) {
+        display: none;
+      }
+
+      .hero {
+        min-height: 640px;
+        padding: 58px 0 42px;
+      }
+
+      .hero-stage {
+        top: 70px;
+        width: calc(100% - 12px);
+        height: 320px;
+      }
+
+      .desktop-shell {
+        border-radius: 30px;
+      }
+
+      .menu-strip {
+        left: 12px;
+        right: 12px;
+        top: 12px;
+      }
+
+      .menu-left .menu-status,
+      .menu-right .menu-status {
+        display: none;
+      }
+
+      .terminal-window {
+        display: none;
+      }
+
+      .hero-panel {
+        left: 20px;
+        right: 20px;
+        top: 118px;
+        width: auto;
+      }
+
+      .hero-panel .panel-row:nth-child(3),
+      .hero-panel .panel-row:nth-child(4) {
+        display: none;
+      }
+
+      .panel-row {
+        min-height: 54px;
+        padding: 10px 6px;
+      }
+
+      .progress-card {
+        display: none;
+      }
+
+      .shortcut-tile {
+        display: none;
+      }
+
+      .hero-copy {
+        padding-top: 300px;
+      }
+
+      h1 {
+        font-size: 52px;
+      }
+
+      .hero-subtitle {
+        font-size: 18px;
+      }
+
+      .hero-actions {
+        display: grid;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .hero-actions .secondary {
+        display: none;
+      }
+
+      .proof-row {
+        display: none;
+      }
+
+      .section {
+        padding: 64px 0;
+      }
+
+      #why {
+        padding-top: 24px;
+      }
+
+      .section-heading h2,
+      .cta-card h2 {
+        font-size: 36px;
+      }
+
+      .feature-card,
+      .safety-copy,
+      .cta-card {
+        padding: 20px;
+      }
+
+      .logo-row,
+      .metric-strip {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 1ms !important;
+      }
+
+      .hero-stage {
+        transform: translateX(-50%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="container nav glass">
+      <a class="brand" href="#top" aria-label="Don't Stop home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 17h14"></path>
+            <path d="M7 6h10v9H7z"></path>
+            <path d="M3 20h18"></path>
+          </svg>
+        </span>
+        Don't Stop
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#why">Why</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#safety">Safety</a>
+        <a href="https://github.com/aannuuj/dont-stop/blob/main/docs/agent-setup.md">Agents</a>
+        <a href="#faq">FAQ</a>
+        <a class="nav-cta" href="../README.md">Get app</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-stage" aria-hidden="true">
+          <div class="desktop-shell">
+            <div class="menu-strip glass">
+              <div class="menu-left">
+                <span>Finder</span>
+                <span>Terminal</span>
+              </div>
+              <div class="menu-right">
+                <span class="menu-status"><span class="menu-dot"></span>Awake</span>
+                <span class="menu-chip">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 17h14"></path>
+                    <path d="M7 7h10v8H7z"></path>
+                  </svg>
+                  Awake
+                </span>
+                <span>92%</span>
+              </div>
+            </div>
+
+            <div class="terminal-window">
+              <div class="terminal-top"><i></i><i></i><i></i></div>
+              <div class="terminal-body">
+                <span class="blue">$</span> dont-stop run -- codex<br>
+                <span class="green">awake session started</span><br>
+                indexing repo, running tests, applying patch<br>
+                agent can finish while you step away<span class="terminal-caret"></span>
+              </div>
+            </div>
+
+            <div class="hero-panel glass">
+              <div class="panel-title">
+                <strong>Don't Stop</strong>
+                <span>Menu bar</span>
+              </div>
+              <div class="panel-row">
+                <span>
+                  <span class="panel-label">Stay awake</span>
+                  <span class="panel-copy">Keep long tasks alive</span>
+                </span>
+                <span class="switch"></span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">Display</span>
+                <span class="segmented"><span>Can sleep</span><span class="active">Stay on</span></span>
+              </div>
+              <div class="panel-row">
+                <span class="panel-label">Timer</span>
+                <span class="select-pill">Until stopped <span>⌄</span></span>
+              </div>
+              <div class="panel-row">
+                <span>
+                  <span class="panel-label">Lid mode</span>
+                  <span class="panel-copy">Run after close</span>
+                </span>
+                <span class="switch"></span>
+              </div>
+            </div>
+
+            <div class="progress-card glass">
+              <span class="pulse"></span>
+              <span>
+                <strong>Agent run protected</strong>
+                <span>Sleep blocked until this session ends</span>
+              </span>
+            </div>
+
+            <div class="shortcut-tile glass">
+              <span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18h6"></path>
+                  <path d="M8 6h8v10H8z"></path>
+                  <path d="M5 21h14"></path>
+                </svg>
+                Menu bar first
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="container">
+          <div class="hero-copy reveal">
+            <div class="eyebrow glass"><span class="live-dot"></span>Native macOS utility for AI coding runs</div>
+            <h1>Don't Stop</h1>
+            <p class="hero-subtitle">
+              Keep Codex, Claude Code, Cursor, builds, and test suites running when your Mac would normally drift to sleep.
+              One menu bar control for awake sessions, display behavior, timers, and lid-closed work.
+            </p>
+            <div class="hero-actions">
+              <a class="button primary" href="../README.md">Install from source</a>
+              <a class="button secondary" href="#workflow">See the workflow</a>
+            </div>
+            <a class="agent-setup-link" href="https://github.com/aannuuj/dont-stop/blob/main/docs/agent-setup.md">
+              Add to Claude or Codex from GitHub <span aria-hidden="true">→</span>
+            </a>
+            <div class="proof-row" aria-label="Product proof points">
+              <span>Built for Codex, Claude Code, and Cursor</span>
+              <span>Local Mac app, no account flow</span>
+              <span>Menu bar, terminal, and agent skill</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="why">
+        <div class="container">
+          <div class="section-heading reveal">
+            <h2>Your run should not depend on your lid angle.</h2>
+            <p>
+              AI agents make the Mac idle for long stretches while they read, build, test, and wait on tools. Don't Stop gives those sessions an explicit power policy.
+            </p>
+          </div>
+
+          <div class="logo-row reveal">
+            <div class="logo-pill"><b>Codex</b> patch runs</div>
+            <div class="logo-pill"><b>Claude Code</b> tasks</div>
+            <div class="logo-pill"><b>Cursor</b> agents</div>
+            <div class="logo-pill"><b>Terminal</b> jobs</div>
+          </div>
+
+          <div class="feature-grid" style="margin-top: 14px;">
+            <article class="feature-card large reveal">
+              <div>
+                <span class="feature-kicker">Product promise</span>
+                <h3>Start a session, walk away, come back to a finished run.</h3>
+                <p>
+                  Keep the Mac awake for the work you intentionally started. Choose whether the display stays on, set an end time, and make the state obvious from the menu bar.
+                </p>
+                <div class="metric-strip">
+                  <div class="metric"><strong>1 click</strong><span>menu bar control</span></div>
+                  <div class="metric"><strong>3 paths</strong><span>app, CLI, skill</span></div>
+                  <div class="metric"><strong>0 login</strong><span>runs locally</span></div>
+                </div>
+              </div>
+              <div class="mini-panel">
+                <div class="mini-panel-row"><strong>Stay awake</strong><span>On</span></div>
+                <div class="mini-panel-row"><strong>Display</strong><span>Can sleep or stay on</span></div>
+                <div class="mini-panel-row"><strong>Timer</strong><span>30 min to unlimited</span></div>
+                <div class="mini-panel-row"><strong>Lid mode</strong><span>Optional</span></div>
+              </div>
+            </article>
+
+            <article class="feature-card reveal">
+              <span class="feature-kicker">Native feel</span>
+              <h3>Designed like a Mac control, not a dashboard.</h3>
+              <p>
+                The menu bar stays compact. The panel is built for fast toggles, not settings archaeology.
+              </p>
+            </article>
+
+            <article class="feature-card reveal">
+              <span class="feature-kicker">Safer defaults</span>
+              <h3>Powerful modes stay intentional.</h3>
+              <p>
+                Lid-closed running is separated from normal awake sessions and paired with clear safety guidance.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="workflow">
+        <div class="container">
+          <div class="section-heading reveal">
+            <h2>Use it where the work starts.</h2>
+            <p>
+              Don't Stop is not just a toggle. It can wrap the command, expose a menu bar state, and give agents a predictable way to protect long runs.
+            </p>
+          </div>
+
+          <div class="workflow">
+            <div class="workflow-list">
+              <div class="step reveal">
+                <span class="step-number">1</span>
+                <span>
+                  <h3>Menu bar when you are at the Mac</h3>
+                  <p>Start an awake session, pick display behavior, and set a timer without opening System Settings.</p>
+                </span>
+              </div>
+              <div class="step reveal">
+                <span class="step-number">2</span>
+                <span>
+                  <h3>Terminal wrapper when the run is command driven</h3>
+                  <p>Wrap Codex, build jobs, migrations, or test suites so power protection starts and stops with the command.</p>
+                </span>
+              </div>
+              <div class="step reveal">
+                <span class="step-number">3</span>
+                <span>
+                  <h3>Agent skill when Codex or Claude is operating</h3>
+                  <p>Give coding agents a named tool policy: protect the run, check status, and clean up after completion.</p>
+                </span>
+              </div>
+            </div>
+
+            <div class="code-window reveal">
+              <div class="code-top"><i></i><i></i><i></i></div>
+              <pre><span class="blue">$</span> make install
+<span class="green">Installed ~/Applications/Don't Stop.app</span>
+
+<span class="blue">$</span> dont-stop run -- npm test
+<span class="green">Awake session started</span>
+running test suite...
+<span class="amber">Session ends when the command exits</span>
+
+<span class="blue">$</span> dont-stop status
+state=awake
+display=can-sleep
+timer=until-stopped</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="safety">
+        <div class="container">
+          <div class="section-heading reveal">
+            <h2>Built for the part normal awake apps avoid.</h2>
+            <p>
+              Normal idle-sleep blockers are useful while the Mac is open. Don't Stop also gives lid-closed work a product surface, permission memory, and cleanup path.
+            </p>
+          </div>
+
+          <div class="safety-layout">
+            <article class="safety-copy glass reveal">
+              <h3>Lid mode is explicit, remembered, and reversible.</h3>
+              <p>
+                When you enable lid-closed running, Don't Stop asks once, installs the narrow permission it needs, and avoids repeating the same admin prompt during future toggles.
+              </p>
+              <div class="safety-list">
+                <div class="safety-item">
+                  <span class="safety-icon">✓</span>
+                  <span><strong>Clear state</strong><span>Menu bar text changes from Ready to Awake or Lid so you know what is active.</span></span>
+                </div>
+                <div class="safety-item">
+                  <span class="safety-icon">✓</span>
+                  <span><strong>Scoped control</strong><span>The app only asks for what is needed to switch lid mode on and off.</span></span>
+                </div>
+                <div class="safety-item">
+                  <span class="safety-icon">✓</span>
+                  <span><strong>Cleanup behavior</strong><span>Sessions can be timed, stopped manually, or ended when a wrapped command exits.</span></span>
+                </div>
+              </div>
+            </article>
+
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt" id="compare">
+        <div class="container">
+          <div class="section-heading reveal">
+            <h2>Why this instead of another keep-awake toggle?</h2>
+            <p>
+              Caffeinated sessions are table stakes. Agent workflows need clearer state, fewer repeated prompts, and a way to attach awake behavior to the job itself.
+            </p>
+          </div>
+
+          <div class="compare-table reveal" role="table" aria-label="Comparison table">
+            <div class="compare-row compare-head" role="row">
+              <div class="compare-cell" role="columnheader"><strong>Capability</strong></div>
+              <div class="compare-cell" role="columnheader"><strong>caffeinate</strong></div>
+              <div class="compare-cell" role="columnheader"><strong>Energy settings</strong></div>
+              <div class="compare-cell" role="columnheader"><strong>Don't Stop</strong></div>
+            </div>
+            <div class="compare-row" role="row">
+              <div class="compare-cell"><strong>Quick menu bar control</strong></div>
+              <div class="compare-cell">No</div>
+              <div class="compare-cell">Buried in settings</div>
+              <div class="compare-cell good">Yes</div>
+            </div>
+            <div class="compare-row" role="row">
+              <div class="compare-cell"><strong>Wraps a command</strong></div>
+              <div class="compare-cell">Yes</div>
+              <div class="compare-cell">No</div>
+              <div class="compare-cell good">Yes, with cleanup</div>
+            </div>
+            <div class="compare-row" role="row">
+              <div class="compare-cell"><strong>Lid-closed workflow</strong></div>
+              <div class="compare-cell">Limited</div>
+              <div class="compare-cell">Manual, global</div>
+              <div class="compare-cell good">Explicit mode</div>
+            </div>
+            <div class="compare-row" role="row">
+              <div class="compare-cell"><strong>Agent-friendly status</strong></div>
+              <div class="compare-cell">No</div>
+              <div class="compare-cell">No</div>
+              <div class="compare-cell good">CLI and skill</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="faq">
+        <div class="container">
+          <div class="section-heading reveal">
+            <h2>Questions before you trust it overnight.</h2>
+            <p>
+              The app is intentionally small, local, and visible. You should always know when it is protecting a run.
+            </p>
+          </div>
+
+          <div class="faq-grid">
+            <article class="faq-item reveal">
+              <h3>Will it ask for my password every time?</h3>
+              <p>No. Lid mode is designed to ask once, remember the permission, and switch without repeating the same prompt on future toggles.</p>
+            </article>
+            <article class="faq-item reveal">
+              <h3>Does the display have to stay on?</h3>
+              <p>No. You can keep the Mac awake while still allowing the display to sleep, or keep the screen on when you need visible progress.</p>
+            </article>
+            <article class="faq-item reveal">
+              <h3>Is lid-closed running always safe?</h3>
+              <p>Use it intentionally. Keep the Mac on a hard surface with airflow, preferably on power, and stop the session when the job is done.</p>
+            </article>
+            <article class="faq-item reveal">
+              <h3>Can agents use it directly?</h3>
+              <p>Yes. The helper and the Don't Stop skill let Codex or Claude protect long-running work, check current state, and release protection after completion.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="container">
+          <div class="cta-card reveal">
+            <div>
+              <h2>Let the Mac sleep when you decide, not mid-run.</h2>
+              <p>
+                Install the app, start an awake session from the menu bar, or wrap the exact command that needs to finish.
+              </p>
+              <div class="hero-actions">
+                <a class="button primary" href="../README.md">Get Don't Stop</a>
+                <a class="button secondary" href="https://github.com/aannuuj/dont-stop/blob/main/docs/agent-setup.md">Claude / Codex setup on GitHub</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container">
+        <span>Don't Stop for macOS</span>
+        <a href="https://github.com/aannuuj/dont-stop/blob/main/docs/agent-setup.md">CLI helper and Claude/Codex skill setup on GitHub.</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    const root = document.documentElement;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (!reduceMotion) {
+      window.addEventListener("pointermove", (event) => {
+        const x = event.clientX / Math.max(window.innerWidth, 1) - 0.5;
+        const y = event.clientY / Math.max(window.innerHeight, 1) - 0.5;
+        root.style.setProperty("--mx", x.toFixed(3));
+        root.style.setProperty("--my", y.toFixed(3));
+      }, { passive: true });
+
+      let ticking = false;
+      window.addEventListener("scroll", () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          const amount = Math.min(window.scrollY / 700, 1).toFixed(3);
+          root.style.setProperty("--scroll", amount);
+          ticking = false;
+        });
+      }, { passive: true });
+    }
+
+    const reveals = document.querySelectorAll(".reveal");
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
+        }
+      }
+    }, { threshold: 0.12 });
+
+    reveals.forEach((node) => observer.observe(node));
+  </script>
+</body>
+</html>

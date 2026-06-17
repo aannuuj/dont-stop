@@ -1,5 +1,4 @@
 // swift-tools-version: 5.9
-
 import PackageDescription
 
 let package = Package(
@@ -8,12 +7,17 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "DontStop", targets: ["DontStop"])
+        .library(name: "DontStopCore", targets: ["DontStopCore"])
     ],
     targets: [
-        .executableTarget(
-            name: "DontStop",
-            path: "Sources/DontStop"
+        .target(
+            name: "DontStopCore",
+            path: "Sources/DontStopCore"
+        ),
+        .testTarget(
+            name: "DontStopCoreTests",
+            dependencies: ["DontStopCore"],
+            path: "Tests/DontStopCoreTests"
         )
     ]
 )

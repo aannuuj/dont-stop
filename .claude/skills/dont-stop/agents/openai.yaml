@@ -1,0 +1,7 @@
+interface:
+  display_name: "Don't Stop"
+  short_description: "Keep Mac agent runs awake"
+  brand_color: "#111111"
+  default_prompt: "Use $dont-stop to keep this long-running agent command awake and clean it up afterward."
+policy:
+  allow_implicit_invocation: true
