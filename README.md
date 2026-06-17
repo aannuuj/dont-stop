@@ -30,8 +30,17 @@ The menu bar control panel shows a compact frosted settings window:
 - Screen: let the display turn off, or keep it on
 - Stop after: choose when awake mode turns off
 - Run after lid closes: asks once for scoped permission, then switches lid mode without repeated prompts
+- Look-Away: optional 25-minute eye break reminder
 
 Left-click the menu bar item to open the compact control panel. Right-click or Command-click it to open the settings menu.
+
+## Look-Away Reminder
+
+Look-Away is optional and off by default. When enabled, Don't Stop shows a full-screen blurred overlay every 25 minutes with animated eyes, a 30-second countdown, and a Skip break button.
+
+Use the panel footer to turn it on or off, or use the settings menu item `Start Look-Away Break Now` to trigger a break manually.
+
+![Don't Stop Look-Away overlay with animated eyes, countdown, and skip button](docs/assets/look-away-overlay.jpg)
 
 ## Shortcuts
 

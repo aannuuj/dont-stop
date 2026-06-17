@@ -1014,6 +1014,40 @@
       font-weight: 560;
     }
 
+    .lookaway-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--glass-strong);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .lookaway-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 10.34;
+      object-fit: cover;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .lookaway-card-content {
+      padding: 22px;
+    }
+
+    .lookaway-card h3 {
+      margin-bottom: 8px;
+      font-size: 28px;
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .lookaway-card p {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+      font-weight: 540;
+    }
+
     .compare-table {
       border: 1px solid var(--line);
       border-radius: 24px;
@@ -1400,6 +1434,7 @@
 
       .feature-card,
       .safety-copy,
+      .lookaway-card-content,
       .cta-card {
         padding: 20px;
       }
@@ -1698,6 +1733,15 @@ timer=until-stopped</pre>
               </div>
             </article>
 
+            <article class="lookaway-card reveal">
+              <img src="../docs/assets/look-away-overlay.jpg" alt="Don't Stop Look-Away overlay with animated eyes, countdown, and skip button">
+              <div class="lookaway-card-content">
+                <h3>Optional look-away breaks.</h3>
+                <p>
+                  Long agent runs can turn into long staring sessions. Turn on Look-Away when you want a 30-second full-screen reminder every 25 minutes, with a manual break option in the menu.
+                </p>
+              </div>
+            </article>
           </div>
         </div>
       </section>
