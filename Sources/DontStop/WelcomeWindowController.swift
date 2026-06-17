@@ -520,6 +520,7 @@ final class WelcomeWindowController: NSWindowController {
         let button = NSButton(title: "", target: self, action: #selector(agentSetupPressed))
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isBordered = false
+        button.focusRingType = .none
         button.setButtonType(.momentaryChange)
         button.toolTip = "Open GitHub setup for agent coding editors and CLI wrapping"
         button.setAccessibilityLabel("Use with Codex or Claude on GitHub")
@@ -541,9 +542,9 @@ final class WelcomeWindowController: NSWindowController {
         arrow.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .bold)
         arrow.contentTintColor = secondaryText
 
-        row.addSubview(button)
         row.addSubview(textStack)
         row.addSubview(arrow)
+        row.addSubview(button)
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: 52),
 
