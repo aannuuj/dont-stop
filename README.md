@@ -2,7 +2,10 @@
 
 Don't Stop is a tiny macOS menu bar app that keeps the Mac awake using native `IOPMAssertion` power-management assertions.
 
-![Don't Stop menu bar panel showing awake, display, timer, lid mode, agent setup, and quit controls](docs/assets/menu-panel-lid-mode.png)
+<p align="center">
+  <img src="docs/assets/menu-panel-lid-mode.png" alt="Don't Stop dark mode menu bar panel" width="360">
+  <img src="docs/assets/menu-panel-light-mode.png" alt="Don't Stop light mode menu bar panel" width="360">
+</p>
 
 ## Links
 
