@@ -4,7 +4,7 @@ import Foundation
 let appSupportName = "DontStop"
 let lookAwayIntervalSeconds: TimeInterval = 25 * 60
 let lookAwayDurationSeconds = 30
-let agentSetupURL = URL(string: "https://github.com/aannuuj/dont-stop/blob/main/docs/agent-setup.md")!
+let agentSetupURL = URL(string: "https://github.com/aannuuj/dont-stop/blob/master/docs/agent-setup.md")!
 
 enum MonoPalette {
     static let canvasTop = NSColor(calibratedWhite: 0.060, alpha: 1.0)
